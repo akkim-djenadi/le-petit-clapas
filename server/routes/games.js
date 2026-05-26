@@ -85,11 +85,18 @@ router.post('/:id/play', requireAuth, async (req, res, next) => {
 
     if (!isCorrect) return res.status(200).json({ won: false, message: 'Mauvaise réponse, réessayez !' });
 
-    await game.update({ winner_id: req.user.id, status: 'ended' });
+    if (game.ticketOffer.quantity_remaining <= 0)
+      return res.status(400).json({ error: 'Plus de récompenses disponibles' });
 
-    if (game.ticketOffer.quantity_remaining > 0) {
-      await game.ticketOffer.decrement('quantity_remaining');
-    }
+    // Atomic claim: only one winner
+    const { sequelize } = require('../models');
+    const [claimCount] = await Game.update(
+      { winner_id: req.user.id, status: 'ended' },
+      { where: { id: game.id, winner_id: null, status: 'active' } }
+    );
+    if (claimCount === 0) return res.status(409).json({ error: 'Ce jeu a déjà un gagnant' });
+
+    await game.ticketOffer.decrement('quantity_remaining');
 
     const userTicket = await UserTicket.create({
       user_id: req.user.id,

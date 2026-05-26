@@ -58,7 +58,7 @@ describe('GET /api/games/active', () => {
 describe('POST /api/games/:id/play', () => {
   test('user peut jouer et potentiellement gagner', async () => {
     const game = await Game.findOne({ where: { status: 'active' } });
-    if (!game) return;
+    if (!game) { expect(game).not.toBeNull(); return; }
     const res = await request(app)
       .post(`/api/games/${game.id}/play`)
       .set('Authorization', `Bearer ${userToken}`)
