@@ -74,4 +74,20 @@ describe('PUT /api/user-tickets/:qr/scan', () => {
       .set('Authorization', `Bearer ${merchantToken}`);
     expect(res.status).toBe(409);
   });
+
+  test('refuse un QR expiré', async () => {
+    const offer = await TicketOffer.create({
+      commerce_id: commerce.id, title: 'Test3', advantage: 'Cadeau3',
+      quantity_total: 1, quantity_remaining: 1, created_by: merchantUser.id,
+    });
+    const ticket = await UserTicket.create({
+      user_id: normalUser.id, ticket_offer_id: offer.id,
+      qr_code: 'expired-uuid-9999', status: 'expired', won_at: new Date(),
+    });
+
+    const res = await request(app)
+      .put(`/api/user-tickets/${ticket.qr_code}/scan`)
+      .set('Authorization', `Bearer ${merchantToken}`);
+    expect(res.status).toBe(410);
+  });
 });
