@@ -49,6 +49,9 @@ router.put('/:id', requireMerchant, async (req, res, next) => {
   try {
     const offer = await TicketOffer.findByPk(req.params.id);
     if (!offer) return res.status(404).json({ error: 'Offre introuvable' });
+    const profile = await MerchantProfile.findOne({ where: { user_id: req.user.id } });
+    if (!profile || offer.commerce_id !== profile.commerce_id)
+      return res.status(403).json({ error: 'Accès refusé' });
     const { is_active, title, advantage, valid_until } = req.body;
     await offer.update({ is_active, title, advantage, valid_until });
     res.json(offer);
