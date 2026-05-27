@@ -1,150 +1,22 @@
 const router = require('express').Router();
-const multer = require('multer');
-const { Op } = require('sequelize');
 const { requireAdmin } = require('../middleware/auth');
-const { parseCSV, detectColumns, buildGithubImageUrl, validateRow } = require('../services/csvImport');
-const { uploadFromUrl } = require('../services/cloudinary');
-const { slugify } = require('../services/slugify');
-const {
-  Commerce, Category, Subcategory, CommerceImage,
-  MerchantProfile, CreditTransaction, Review, User, sequelize,
-} = require('../models');
+const { User, Commerce, MerchantProfile, CreditTransaction, Review, Category, Subcategory, Game } = require('../models');
+const { Op } = require('sequelize');
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-
-// ── Import CSV ──────────────────────────────────────────────────────────────
-
-router.post('/import-csv/preview', requireAdmin, upload.single('file'), async (req, res, next) => {
-  try {
-    const rows = await parseCSV(req.file.buffer);
-    if (!rows.length) return res.status(400).json({ error: 'Fichier vide' });
-    const headers = Object.keys(rows[0]);
-    const mapping = detectColumns(headers);
-    const preview = rows.slice(0, 5).map(row => ({
-      row,
-      errors: validateRow(row, mapping),
-    }));
-    res.json({ headers, mapping, preview, total: rows.length });
-  } catch (err) { next(err); }
-});
-
-router.post('/import-csv/execute', requireAdmin, upload.single('file'), async (req, res, next) => {
-  try {
-    const rows = await parseCSV(req.file.buffer);
-    const mapping = JSON.parse(req.body.mapping);
-    const results = { created: 0, skipped: 0, errors: [] };
-
-    for (const [i, row] of rows.entries()) {
-      const rowErrors = validateRow(row, mapping);
-      if (rowErrors.length) { results.errors.push({ row: i + 1, errors: rowErrors }); results.skipped++; continue; }
-
-      try {
-        const name = row[mapping.name];
-        const slug = slugify(name);
-        const existing = await Commerce.findOne({ where: { slug } });
-        if (existing) { results.skipped++; continue; }
-
-        // Résoudre catégorie
-        let category = null;
-        if (mapping.category && row[mapping.category]) {
-          category = await Category.findOne({ where: { name: { [Op.like]: row[mapping.category] } } });
-          if (!category) {
-            category = await Category.create({ name: row[mapping.category], slug: slugify(row[mapping.category]) });
-          }
-        }
-
-        // Résoudre sous-catégorie
-        let subcategory = null;
-        if (mapping.subcategory && row[mapping.subcategory] && category) {
-          subcategory = await Subcategory.findOne({ where: { name: row[mapping.subcategory], category_id: category.id } });
-          if (!subcategory) {
-            subcategory = await Subcategory.create({
-              name: row[mapping.subcategory],
-              slug: slugify(row[mapping.subcategory]),
-              category_id: category.id,
-            });
-          }
-        }
-
-        const commerce = await Commerce.create({
-          name,
-          slug,
-          category_id: category?.id,
-          subcategory_id: subcategory?.id,
-          address: row[mapping.address],
-          lat: mapping.lat ? parseFloat(row[mapping.lat]) || null : null,
-          lng: mapping.lng ? parseFloat(row[mapping.lng]) || null : null,
-          phone: row[mapping.phone],
-          website: row[mapping.website],
-          email: row[mapping.email],
-          description: row[mapping.description],
-        });
-
-        // Image depuis GitHub (non bloquant)
-        if (mapping.image && row[mapping.image]) {
-          const githubUrl = buildGithubImageUrl(row[mapping.image]);
-          uploadFromUrl(githubUrl, 'petit-clapas/commerces')
-            .then(({ url, public_id }) =>
-              CommerceImage.create({ commerce_id: commerce.id, cloudinary_url: url, cloudinary_public_id: public_id, is_primary: true })
-            )
-            .catch(() => {});
-        }
-
-        results.created++;
-      } catch (err) {
-        results.errors.push({ row: i + 1, errors: [err.message] });
-        results.skipped++;
-      }
-    }
-
-    res.json(results);
-  } catch (err) { next(err); }
-});
-
-// ── Crédits Marchands ───────────────────────────────────────────────────────
-
-router.post('/credits', requireAdmin, async (req, res, next) => {
-  try {
-    const { merchant_id, amount, note, price_paid } = req.body;
-    if (!merchant_id || !amount || amount <= 0) return res.status(400).json({ error: 'Données invalides' });
-
-    const t = await sequelize.transaction();
-    try {
-      await CreditTransaction.create({ merchant_id, amount, type: 'credit', note, price_paid, created_by: req.user.id }, { transaction: t });
-      await MerchantProfile.increment('tickets_balance', { by: amount, where: { user_id: merchant_id }, transaction: t });
-      await t.commit();
-    } catch (err) { await t.rollback(); throw err; }
-
-    const profile = await MerchantProfile.findOne({ where: { user_id: merchant_id } });
-    res.json({ ok: true, tickets_balance: profile.tickets_balance });
-  } catch (err) { next(err); }
-});
-
-router.get('/credits/:merchant_id', requireAdmin, async (req, res, next) => {
-  try {
-    const transactions = await CreditTransaction.findAll({
-      where: { merchant_id: req.params.merchant_id },
-      order: [['created_at', 'DESC']],
-    });
-    res.json(transactions);
-  } catch (err) { next(err); }
-});
-
-// ── Stats globales ──────────────────────────────────────────────────────────
-
+// GET /admin/stats
 router.get('/stats', requireAdmin, async (req, res, next) => {
   try {
-    const [totalCommerces, totalUsers, pendingReviews] = await Promise.all([
+    const [totalCommerces, totalUsers, pendingReviews, activeGames] = await Promise.all([
       Commerce.count({ where: { status: 'active' } }),
-      User.count({ where: { role: 'user' } }),
+      User.count(),
       Review.count({ where: { status: 'pending' } }),
+      Game.count({ where: { status: 'active' } }),
     ]);
-    res.json({ totalCommerces, totalUsers, pendingReviews });
+    res.json({ totalCommerces, totalUsers, pendingReviews, activeGames });
   } catch (err) { next(err); }
 });
 
-// ── Gestion Marchands ───────────────────────────────────────────────────────
-
+// GET /admin/merchants
 router.get('/merchants', requireAdmin, async (req, res, next) => {
   try {
     const merchants = await MerchantProfile.findAll({
@@ -152,22 +24,43 @@ router.get('/merchants', requireAdmin, async (req, res, next) => {
         { model: User, attributes: ['id', 'name', 'email'] },
         { model: Commerce, as: 'commerce', attributes: ['id', 'name'] },
       ],
+      order: [['tickets_balance', 'ASC']],
     });
     res.json(merchants);
   } catch (err) { next(err); }
 });
 
-router.post('/merchants', requireAdmin, async (req, res, next) => {
+// POST /admin/credits
+router.post('/credits', requireAdmin, async (req, res, next) => {
   try {
-    const { user_id, commerce_id } = req.body;
-    await User.update({ role: 'merchant' }, { where: { id: user_id } });
-    const profile = await MerchantProfile.create({ user_id, commerce_id });
-    res.status(201).json(profile);
+    const { merchant_id, amount, note, price_paid } = req.body;
+    if (!merchant_id || !amount || amount < 1) return res.status(400).json({ error: 'merchant_id et amount requis' });
+    const profile = await MerchantProfile.findOne({ where: { user_id: merchant_id } });
+    if (!profile) return res.status(404).json({ error: 'Marchand introuvable' });
+    await profile.increment('tickets_balance', { by: amount });
+    const tx = await CreditTransaction.create({
+      merchant_id,
+      amount,
+      note: note || null,
+      price_paid: price_paid || null,
+      admin_id: req.user.id,
+    });
+    res.status(201).json(tx);
   } catch (err) { next(err); }
 });
 
-// ── Reviews admin ──────────────────────────────────────────────────────────
+// GET /admin/credits/:id
+router.get('/credits/:id', requireAdmin, async (req, res, next) => {
+  try {
+    const txs = await CreditTransaction.findAll({
+      where: { merchant_id: req.params.id },
+      order: [['created_at', 'DESC']],
+    });
+    res.json(txs);
+  } catch (err) { next(err); }
+});
 
+// GET /admin/reviews
 router.get('/reviews', requireAdmin, async (req, res, next) => {
   try {
     const { status = 'pending' } = req.query;
@@ -180,6 +73,78 @@ router.get('/reviews', requireAdmin, async (req, res, next) => {
       order: [['created_at', 'ASC']],
     });
     res.json(reviews);
+  } catch (err) { next(err); }
+});
+
+// POST /admin/import-csv/preview
+const multer = require('multer');
+const csv = require('csv-parse/sync');
+const upload = multer({ storage: multer.memoryStorage() });
+
+router.post('/import-csv/preview', requireAdmin, upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier CSV requis' });
+    const records = csv.parse(req.file.buffer.toString('utf-8'), { columns: true, skip_empty_lines: true });
+    const headers = records.length > 0 ? Object.keys(records[0]) : [];
+    // Auto-map headers by guessing common names
+    const autoMapping = {};
+    const guesses = { name: ['nom','name','title'], address: ['adresse','address'], lat: ['lat','latitude'], lng: ['lng','lon','longitude'], category: ['categorie','category'], subcategory: ['sous_categorie','subcategory','sous-catégorie'], phone: ['telephone','phone','tel'], website: ['site','website','url'], email: ['email','mail'], description: ['description','desc'], image: ['image','photo','img'] };
+    for (const [field, candidates] of Object.entries(guesses)) {
+      const found = headers.find(h => candidates.includes(h.toLowerCase().replace(/[éèê]/g, 'e').replace(/\s+/g, '_')));
+      if (found) autoMapping[field] = found;
+    }
+    const preview = records.slice(0, 10).map(row => ({ row, errors: [] }));
+    res.json({ headers, mapping: autoMapping, preview, total: records.length });
+  } catch (err) { next(err); }
+});
+
+// POST /admin/import-csv/execute
+router.post('/import-csv/execute', requireAdmin, upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Fichier CSV requis' });
+    const mapping = JSON.parse(req.body.mapping || '{}');
+    const records = csv.parse(req.file.buffer.toString('utf-8'), { columns: true, skip_empty_lines: true });
+    let created = 0, skipped = 0;
+    const errors = [];
+    for (const row of records) {
+      try {
+        const name = mapping.name ? row[mapping.name] : null;
+        if (!name) { skipped++; continue; }
+        const existing = await Commerce.findOne({ where: { name } });
+        if (existing) { skipped++; continue; }
+        // Resolve category
+        let categoryId = null, subcategoryId = null;
+        if (mapping.category && row[mapping.category]) {
+          const catName = row[mapping.category];
+          const [cat] = await Category.findOrCreate({ where: { name: catName }, defaults: { name: catName } });
+          categoryId = cat.id;
+          if (mapping.subcategory && row[mapping.subcategory]) {
+            const subName = row[mapping.subcategory];
+            const [sub] = await Subcategory.findOrCreate({ where: { name: subName, category_id: categoryId }, defaults: { name: subName, category_id: categoryId } });
+            subcategoryId = sub.id;
+          }
+        }
+        const slug = name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
+        await Commerce.create({
+          name,
+          slug,
+          address: mapping.address ? row[mapping.address] : null,
+          lat: mapping.lat ? parseFloat(row[mapping.lat]) || null : null,
+          lng: mapping.lng ? parseFloat(row[mapping.lng]) || null : null,
+          phone: mapping.phone ? row[mapping.phone] : null,
+          website: mapping.website ? row[mapping.website] : null,
+          email: mapping.email ? row[mapping.email] : null,
+          description: mapping.description ? row[mapping.description] : null,
+          category_id: categoryId,
+          subcategory_id: subcategoryId,
+          status: 'active',
+        });
+        created++;
+      } catch (e) {
+        errors.push({ row, error: e.message });
+      }
+    }
+    res.json({ created, skipped, errors });
   } catch (err) { next(err); }
 });
 
