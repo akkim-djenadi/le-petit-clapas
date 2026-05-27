@@ -21,7 +21,7 @@ if ('serviceWorker' in navigator && 'PushManager' in window) {
     await fetch(`${import.meta.env.VITE_API_URL}/notifications/push/subscribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-      body: JSON.stringify({ endpoint: sub.endpoint, p256dh: btoa(String.fromCharCode(...new Uint8Array(sub.getKey('p256dh')))), auth: btoa(String.fromCharCode(...new Uint8Array(sub.getKey('auth')))) }),
+      body: JSON.stringify({ endpoint: sub.endpoint, p256dh: btoa(Array.from(new Uint8Array(sub.getKey('p256dh'))).map(b => String.fromCharCode(b)).join('')), auth: btoa(Array.from(new Uint8Array(sub.getKey('auth'))).map(b => String.fromCharCode(b)).join('')) }),
     });
   }).catch(() => {});
 }
