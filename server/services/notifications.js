@@ -2,11 +2,15 @@ const webpush = require('web-push');
 const { PushSubscription, Notification, UserNotification } = require('../models');
 const { getIO } = require('../socket');
 
-webpush.setVapidDetails(
-  process.env.VAPID_EMAIL?.startsWith('mailto:') ? process.env.VAPID_EMAIL : `mailto:${process.env.VAPID_EMAIL}`,
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY,
-);
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  try {
+    webpush.setVapidDetails(
+      process.env.VAPID_EMAIL?.startsWith('mailto:') ? process.env.VAPID_EMAIL : `mailto:${process.env.VAPID_EMAIL}`,
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY,
+    );
+  } catch { /* invalid keys in dev/test env */ }
+}
 
 const broadcastNotification = async ({ type, title, message, game_id = null, commerce_id = null }) => {
   const notif = await Notification.create({ type, title, message, game_id, commerce_id, is_broadcast: true });
