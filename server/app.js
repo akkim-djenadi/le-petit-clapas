@@ -36,6 +36,11 @@ app.use('/api/user-tickets', userTicketRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
 
+const merchantRoutes = require('./routes/merchant');
+const offerRoutes = require('./routes/offers');
+app.use('/api/merchant', merchantRoutes);
+app.use('/api/offers', offerRoutes);
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(err.status || 500).json({ error: err.message || 'Erreur serveur' });
