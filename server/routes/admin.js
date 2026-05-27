@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { requireAdmin } = require('../middleware/auth');
-const { User, Commerce, MerchantProfile, CreditTransaction, Review, Category, Subcategory, Game } = require('../models');
+const { sequelize, User, Commerce, MerchantProfile, CreditTransaction, Review, Category, Subcategory, Game } = require('../models');
 const { Op } = require('sequelize');
 
 // GET /admin/stats
@@ -8,7 +8,7 @@ router.get('/stats', requireAdmin, async (req, res, next) => {
   try {
     const [totalCommerces, totalUsers, pendingReviews, activeGames] = await Promise.all([
       Commerce.count({ where: { status: 'active' } }),
-      User.count(),
+      User.count({ where: { role: 'user' } }),
       Review.count({ where: { status: 'pending' } }),
       Game.count({ where: { status: 'active' } }),
     ]);
@@ -37,13 +37,16 @@ router.post('/credits', requireAdmin, async (req, res, next) => {
     if (!merchant_id || !amount || amount < 1) return res.status(400).json({ error: 'merchant_id et amount requis' });
     const profile = await MerchantProfile.findOne({ where: { user_id: merchant_id } });
     if (!profile) return res.status(404).json({ error: 'Marchand introuvable' });
-    await profile.increment('tickets_balance', { by: amount });
-    const tx = await CreditTransaction.create({
-      merchant_id,
-      amount,
-      note: note || null,
-      price_paid: price_paid || null,
-      admin_id: req.user.id,
+    const tx = await sequelize.transaction(async (t) => {
+      await profile.increment('tickets_balance', { by: amount, transaction: t });
+      return CreditTransaction.create({
+        merchant_id,
+        amount,
+        type: 'credit',
+        note: note || null,
+        price_paid: price_paid || null,
+        created_by: req.user.id,
+      }, { transaction: t });
     });
     res.status(201).json(tx);
   } catch (err) { next(err); }
@@ -79,6 +82,7 @@ router.get('/reviews', requireAdmin, async (req, res, next) => {
 // POST /admin/import-csv/preview
 const multer = require('multer');
 const csv = require('csv-parse/sync');
+const { slugify } = require('../services/slugify');
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/import-csv/preview', requireAdmin, upload.single('file'), async (req, res, next) => {
@@ -116,11 +120,11 @@ router.post('/import-csv/execute', requireAdmin, upload.single('file'), async (r
         let categoryId = null, subcategoryId = null;
         if (mapping.category && row[mapping.category]) {
           const catName = row[mapping.category];
-          const [cat] = await Category.findOrCreate({ where: { name: catName }, defaults: { name: catName } });
+          const [cat] = await Category.findOrCreate({ where: { name: catName }, defaults: { name: catName, slug: slugify(catName) } });
           categoryId = cat.id;
           if (mapping.subcategory && row[mapping.subcategory]) {
             const subName = row[mapping.subcategory];
-            const [sub] = await Subcategory.findOrCreate({ where: { name: subName, category_id: categoryId }, defaults: { name: subName, category_id: categoryId } });
+            const [sub] = await Subcategory.findOrCreate({ where: { name: subName, category_id: categoryId }, defaults: { name: subName, category_id: categoryId, slug: slugify(subName) } });
             subcategoryId = sub.id;
           }
         }

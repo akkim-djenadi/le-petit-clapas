@@ -8,5 +8,6 @@ export const getPendingReviews = (status = 'pending') => client.get(`/admin/revi
 export const moderateReview = (id, status) => client.put(`/reviews/${id}/moderate`, { status }).then(r => r.data);
 export const getGames = () => client.get('/games').then(r => r.data);
 export const createGame = (data) => client.post('/games', data).then(r => r.data);
+export const getAllOffers = () => client.get('/ticket-offers/all').then(r => r.data);
 export const previewCSV = (formData) => client.post('/admin/import-csv/preview', formData).then(r => r.data);
 export const executeCSV = (formData) => client.post('/admin/import-csv/execute', formData).then(r => r.data);

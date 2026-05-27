@@ -1,13 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Check, X } from 'lucide-react';
-import { moderateReview } from '../../api/admin';
-import client from '../../api/client';
+import { getPendingReviews, moderateReview } from '../../api/admin';
 
 export default function AvisAdmin() {
   const [reviews, setReviews] = useState([]);
 
   useEffect(() => {
-    client.get('/admin/reviews?status=pending').then(r => setReviews(r.data)).catch(() => {});
+    getPendingReviews().then(setReviews).catch(() => {});
   }, []);
 
   const moderate = async (id, status) => {

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getGames, createGame } from '../../api/admin';
-import client from '../../api/client';
+import { getGames, createGame, getAllOffers } from '../../api/admin';
 
 export default function JeuxAdmin() {
   const [games, setGames] = useState([]);
@@ -10,7 +9,7 @@ export default function JeuxAdmin() {
 
   useEffect(() => {
     getGames().then(setGames);
-    client.get('/ticket-offers/all').then(r => setOffers(r.data)).catch(() => {});
+    getAllOffers().then(setOffers).catch(() => {});
   }, []);
 
   const handleCreate = async (e) => {
