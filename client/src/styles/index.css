@@ -1,0 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-cream font-sans text-navy; }
+  h1, h2, h3 { @apply font-serif; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-navy text-white px-6 py-3 rounded-lg font-semibold hover:bg-navy-dark transition-colors;
+  }
+  .btn-secondary {
+    @apply bg-terracotta text-white px-6 py-3 rounded-lg font-semibold hover:bg-terracotta-dark transition-colors;
+  }
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-cream-dark overflow-hidden;
+  }
+  .badge {
+    @apply inline-block text-xs font-semibold px-2 py-1 rounded-full;
+  }
+}
