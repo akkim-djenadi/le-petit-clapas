@@ -1,6 +1,7 @@
 const { Sequelize } = require('sequelize');
 
 const isTest = process.env.NODE_ENV === 'test';
+const isProd = process.env.NODE_ENV === 'production';
 
 const sequelize = new Sequelize(
   isTest ? process.env.DB_NAME_TEST : process.env.DB_NAME,
@@ -11,6 +12,11 @@ const sequelize = new Sequelize(
     port: process.env.DB_PORT || 3306,
     dialect: 'mysql',
     logging: false,
+    ...(isProd && {
+      dialectOptions: {
+        ssl: { minVersion: 'TLSv1.2', rejectUnauthorized: true },
+      },
+    }),
   }
 );
 
